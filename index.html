@@ -193,6 +193,7 @@
       </div>
       <p class="text-sm text-textMuted mb-6">
         Enter any shared notebook token to collaborate in real time. No account required.
+        <span class="block mt-2 text-xs text-todo/80">Anyone with the token can read and edit this notebook. Do not use it for private notes.</span>
       </p>
 
       <form id="token-form" class="space-y-4">
@@ -363,23 +364,28 @@
   <!-- ==================== FIREBASE & APP LOGIC ==================== -->
   <script type="module">
     import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
-    import { getAuth, signInAnonymously, signInWithCustomToken } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
+    import { firebaseConfig } from "./firebase-config.js";
     import {
-      getFirestore,
-      collection,
-      doc,
-      addDoc,
-      setDoc,
-      updateDoc,
-      onSnapshot
-    } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+      getDatabase,
+      ref,
+      push,
+      set,
+      update,
+      onValue,
+      onDisconnect,
+      runTransaction,
+      serverTimestamp,
+      remove
+    } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-database.js";
+    import * as Y from "https://esm.sh/yjs@13.6.27";
 
-    // --- Environment & Firebase Setup ---
-    const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
-    const firebaseConfig = typeof __firebase_config !== 'undefined' ? JSON.parse(__firebase_config) : null;
-
-    let app, auth, db;
-    let currentUser = null;
+    let app;
+    let db;
+    let clientId = sessionStorage.getItem('orgcollab-client-id');
+    if (!clientId) {
+      clientId = globalThis.crypto?.randomUUID?.() || `client-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+      sessionStorage.setItem('orgcollab-client-id', clientId);
+    }
 
     // --- App State ---
     let notebookToken = '';
@@ -392,10 +398,19 @@
     let isEditing = false;
     let editingTimeout = null;
     let saveTimeout = null;
+    let titleSaveTimeout = null;
     let heartbeatInterval = null;
     let unsubNotes = null;
     let unsubPresence = null;
+    let unsubConnection = null;
+    let unsubNoteContent = null;
+    let activeNoteDoc = null;
+    let activeNoteText = null;
+    let activeNoteDocObserver = null;
+    let activeNoteIdForDoc = null;
+    let myPresenceRef = null;
     let collapsedSections = new Set();
+    const REMOTE_UPDATE = {};
 
     const USER_COLORS = ['#58a6ff', '#3fb950', '#d2a8ff', '#ffa657', '#ff7b72', '#79c0ff'];
 
@@ -446,40 +461,34 @@
     }
 
     function sanitizeToken(raw) {
-      return raw.trim().toLowerCase().replace(/[^a-z0-9_-]/g, '-');
+      return raw.trim().toLowerCase().replace(/[^a-z0-9_-]/g, '-').slice(0, 80);
     }
 
     function escapeHtml(str) {
       return str
         .replace(/&/g, '&amp;')
         .replace(/</g, '&lt;')
-        .replace(/>/g, '&gt;');
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#39;');
     }
 
-    // --- Initialize Firebase Auth ---
-    async function initAuth() {
-      if (!firebaseConfig) {
-        gateError.textContent = 'Firebase configuration not found.';
-        gateError.classList.remove('hidden');
-        return false;
+    // --- Initialize Firebase without user authentication ---
+    function initFirebase() {
+      const requiredConfig = ['apiKey', 'databaseURL', 'projectId', 'appId'];
+      const missingConfig = requiredConfig.some((key) =>
+        !firebaseConfig[key] ||
+        (typeof firebaseConfig[key] === 'string' && firebaseConfig[key].startsWith('YOUR_'))
+      );
+      if (missingConfig) {
+        throw new Error('Add your Firebase web app settings to firebase-config.js first.');
       }
       try {
         app = initializeApp(firebaseConfig);
-        auth = getAuth(app);
-        db = getFirestore(app);
-
-        if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) {
-          await signInWithCustomToken(auth, __initial_auth_token);
-        } else {
-          await signInAnonymously(auth);
-        }
-        currentUser = auth.currentUser;
-        return !!currentUser;
+        db = getDatabase(app);
       } catch (err) {
-        console.error('Auth error:', err);
-        gateError.textContent = 'Failed to connect: ' + err.message;
-        gateError.classList.remove('hidden');
-        return false;
+        console.error('Firebase initialization error:', err);
+        throw new Error(`Failed to initialize Firebase: ${err.message}`);
       }
     }
 
@@ -490,14 +499,23 @@
       if (!rawToken.trim()) return;
 
       notebookToken = sanitizeToken(rawToken);
+      if (!/[a-z0-9]/.test(notebookToken)) {
+        gateError.textContent = 'Enter a token containing at least one letter or number.';
+        gateError.classList.remove('hidden');
+        return;
+      }
       nickname = nicknameInput.value.trim() || generateRandomNickname();
       userColor = USER_COLORS[Math.floor(Math.random() * USER_COLORS.length)];
 
-      if (!currentUser) {
-        const ok = await initAuth();
-        if (!ok) return;
+      try {
+        if (!db) initFirebase();
+      } catch (err) {
+        gateError.textContent = err.message;
+        gateError.classList.remove('hidden');
+        return;
       }
 
+      gateError.classList.add('hidden');
       tokenGate.classList.add('hidden');
       appShell.classList.remove('hidden');
       notebookBadge.textContent = notebookToken;
@@ -526,48 +544,75 @@
     mobileMenuBtn.addEventListener('click', () => toggleSidebar(true));
     sidebarBackdrop.addEventListener('click', () => toggleSidebar(false));
 
-    // --- Session & Firestore Listeners ---
+    // --- Session & Realtime Database Listeners ---
     function cleanupSession() {
       if (unsubNotes) unsubNotes();
       if (unsubPresence) unsubPresence();
+      if (unsubConnection) unsubConnection();
+      if (unsubNoteContent) unsubNoteContent();
+      unsubNotes = null;
+      unsubPresence = null;
+      unsubConnection = null;
+      unsubNoteContent = null;
       if (heartbeatInterval) clearInterval(heartbeatInterval);
+      heartbeatInterval = null;
+      if (activeNoteDoc && activeNoteIdForDoc) {
+        void persistSharedState(activeNoteIdForDoc, activeNoteDoc);
+      }
+      if (titleSaveTimeout && activeNoteId) {
+        void persistNoteTitle(activeNoteId, noteTitleInput.value.trim() || 'Untitled Note');
+      }
+      clearTimeout(saveTimeout);
+      saveTimeout = null;
+      clearTimeout(titleSaveTimeout);
+      titleSaveTimeout = null;
+      clearTimeout(editingTimeout);
+      if (activeNoteDoc && activeNoteDocObserver) {
+        activeNoteDoc.off('update', activeNoteDocObserver);
+        activeNoteDoc.destroy();
+      }
+      if (myPresenceRef) {
+        onDisconnect(myPresenceRef).cancel().catch((err) => console.error('Presence cleanup error:', err));
+        remove(myPresenceRef).catch((err) => console.error('Presence cleanup error:', err));
+      }
       notes = [];
       presenceList = [];
       activeNoteId = null;
+      activeNoteIdForDoc = null;
+      activeNoteDoc = null;
+      activeNoteText = null;
+      activeNoteDocObserver = null;
+      myPresenceRef = null;
+      isEditing = false;
+      noteTitleInput.value = '';
+      noteEditor.value = '';
+      noteEditor.disabled = true;
+      renderNotesList();
+      renderPresence();
+      renderPreview();
+      updateWorkspaceVisibility();
     }
 
     function startNotebookSession() {
-      if (!currentUser) return;
+      const notesRef = ref(db, `notebooks/${notebookToken}/notes`);
+      const presenceRef = ref(db, `notebooks/${notebookToken}/presence`);
+      myPresenceRef = ref(presenceRef, clientId);
 
-      // 1. Subscribe to Notes
-      const notesRef = collection(db, 'artifacts', appId, 'public', 'data', 'org_notes');
-      unsubNotes = onSnapshot(notesRef, (snapshot) => {
+      unsubNotes = onValue(notesRef, (snapshot) => {
         const allNotes = [];
-        snapshot.forEach((docSnap) => {
-          const data = docSnap.data();
-          if (data.notebookId === notebookToken) {
-            allNotes.push({ id: docSnap.id, ...data });
-          }
+        snapshot.forEach((noteSnapshot) => {
+          allNotes.push({ id: noteSnapshot.key, ...noteSnapshot.val() });
         });
-        // Sort by updatedAt descending in JS
         allNotes.sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0));
         notes = allNotes;
 
-        // Auto-select first note if none selected
         if (!activeNoteId && notes.length > 0) {
           selectNote(notes[0].id);
         } else if (activeNoteId) {
           const current = notes.find(n => n.id === activeNoteId);
           if (current) {
-            // Update editor only if we are not actively typing right now, or if it's a remote update
             if (document.activeElement !== noteTitleInput && noteTitleInput.value !== current.title) {
               noteTitleInput.value = current.title || '';
-            }
-            if (!isEditing && noteEditor.value !== current.content) {
-              const cursorPos = noteEditor.selectionStart;
-              noteEditor.value = current.content || '';
-              noteEditor.setSelectionRange(cursorPos, cursorPos);
-              renderPreview();
             }
           } else {
             activeNoteId = notes.length > 0 ? notes[0].id : null;
@@ -581,66 +626,87 @@
         showToast('Sync error: ' + err.message);
       });
 
-      // 2. Subscribe to Presence
-      const presenceRef = collection(db, 'artifacts', appId, 'public', 'data', 'org_presence');
-      unsubPresence = onSnapshot(presenceRef, (snapshot) => {
+      unsubPresence = onValue(presenceRef, (snapshot) => {
         const now = Date.now();
         const activeUsers = [];
-        snapshot.forEach((docSnap) => {
-          const data = docSnap.data();
-          if (data.notebookId === notebookToken && (now - (data.lastSeen || 0) < 25000)) {
-            activeUsers.push(data);
-          }
+        snapshot.forEach((userSnapshot) => {
+          const data = userSnapshot.val();
+          if (now - (data.lastSeen || 0) < 30000) activeUsers.push(data);
         });
         presenceList = activeUsers;
         renderPresence();
         renderNotesList();
       }, (err) => {
         console.error('Presence listener error:', err);
+        showToast('Presence error: ' + err.message);
       });
 
-      // 3. Start Heartbeat
-      sendHeartbeat();
-      heartbeatInterval = setInterval(sendHeartbeat, 8000);
+      const connectedRef = ref(db, '.info/connected');
+      unsubConnection = onValue(connectedRef, async (snapshot) => {
+        if (snapshot.val() !== true) {
+          syncStatusEl.textContent = 'offline';
+          return;
+        }
+        try {
+          await onDisconnect(myPresenceRef).remove();
+          await sendHeartbeat();
+          syncStatusEl.textContent = 'synced';
+          if (!heartbeatInterval) heartbeatInterval = setInterval(sendHeartbeat, 10000);
+        } catch (err) {
+          console.error('Presence connection error:', err);
+          showToast('Could not register presence: ' + err.message);
+        }
+      }, (err) => {
+        console.error('Connection listener error:', err);
+        showToast('Connection error: ' + err.message);
+      });
     }
 
     async function sendHeartbeat() {
-      if (!currentUser || !notebookToken) return;
+      if (!db || !notebookToken || !myPresenceRef) return;
       try {
-        const presenceDocId = `${notebookToken}_${currentUser.uid}`;
-        const presenceDocRef = doc(db, 'artifacts', appId, 'public', 'data', 'org_presence', presenceDocId);
-        await setDoc(presenceDocRef, {
-          notebookId: notebookToken,
-          userId: currentUser.uid,
+        await set(myPresenceRef, {
+          userId: clientId,
           nickname,
           color: userColor,
           activeNoteId: activeNoteId || null,
           isEditing,
-          lastSeen: Date.now()
+          lastSeen: serverTimestamp()
         });
       } catch (err) {
         console.error('Heartbeat error:', err);
+        showToast('Presence sync failed: ' + err.message);
       }
     }
 
     // --- Note CRUD ---
     async function createNewNote(customTitle = 'Untitled Note') {
-      if (!currentUser) return;
       try {
-        const notesRef = collection(db, 'artifacts', appId, 'public', 'data', 'org_notes');
-        const newDoc = await addDoc(notesRef, {
-          notebookId: notebookToken,
-          title: customTitle,
-          content: `* ${customTitle}\n** TODO First task #notes\n- Write your thoughts here\n`,
-          updatedAt: Date.now(),
-          updatedBy: nickname
+        const noteRef = push(ref(db, `notebooks/${notebookToken}/notes`));
+        const noteId = noteRef.key;
+        const title = customTitle.trim() || 'Untitled Note';
+        const initialContent = `* ${title}\n** TODO First task #notes\n- Write your thoughts here\n`;
+        const initialDoc = new Y.Doc();
+        initialDoc.getText('content').insert(0, initialContent);
+        const encodedState = encodeBytes(Y.encodeStateAsUpdate(initialDoc));
+        initialDoc.destroy();
+
+        await update(ref(db), {
+          [`notebooks/${notebookToken}/notes/${noteId}`]: {
+            title,
+            updatedAt: serverTimestamp(),
+            updatedBy: nickname
+          },
+          [`notebooks/${notebookToken}/noteContent/${noteId}`]: encodedState
         });
-        selectNote(newDoc.id);
+        const newNote = { id: noteId, title, updatedAt: Date.now(), updatedBy: nickname };
+        notes = [newNote, ...notes.filter((note) => note.id !== noteId)];
+        selectNote(noteId);
         toggleSidebar(false);
         noteTitleInput.focus();
       } catch (err) {
         console.error('Create note error:', err);
-        showToast('Could not create note');
+        showToast('Could not create note: ' + err.message);
       }
     }
 
@@ -648,13 +714,78 @@
     emptyNewNoteBtn.addEventListener('click', () => createNewNote());
 
     function selectNote(noteId) {
+      if (activeNoteIdForDoc && activeNoteDoc) {
+        clearTimeout(saveTimeout);
+        void persistSharedState(activeNoteIdForDoc, activeNoteDoc);
+      }
+      if (titleSaveTimeout && activeNoteId) {
+        clearTimeout(titleSaveTimeout);
+        void persistNoteTitle(activeNoteId, noteTitleInput.value.trim() || 'Untitled Note');
+        titleSaveTimeout = null;
+      }
+      if (unsubNoteContent) unsubNoteContent();
+      if (activeNoteDoc && activeNoteDocObserver) {
+        activeNoteDoc.off('update', activeNoteDocObserver);
+        activeNoteDoc.destroy();
+      }
+
       activeNoteId = noteId;
+      activeNoteIdForDoc = noteId;
+      noteEditor.disabled = true;
+      activeNoteDoc = new Y.Doc();
+      activeNoteText = activeNoteDoc.getText('content');
+      activeNoteText.observe(() => {
+        const nextContent = activeNoteText.toString();
+        if (noteEditor.value !== nextContent) {
+          const previousContent = noteEditor.value;
+          let prefix = 0;
+          while (prefix < previousContent.length && prefix < nextContent.length &&
+            previousContent[prefix] === nextContent[prefix]) prefix++;
+          const selectionStart = noteEditor.selectionStart;
+          const selectionEnd = noteEditor.selectionEnd;
+          const delta = nextContent.length - previousContent.length;
+          const adjustPosition = (position) => position <= prefix
+            ? position
+            : Math.max(prefix, position + delta);
+          noteEditor.value = nextContent;
+          noteEditor.setSelectionRange(
+            adjustPosition(selectionStart),
+            adjustPosition(selectionEnd)
+          );
+        }
+        renderPreview();
+      });
+      activeNoteDocObserver = (_updateBytes, origin) => {
+        if (origin === REMOTE_UPDATE) return;
+        scheduleContentSave();
+      };
+      activeNoteDoc.on('update', activeNoteDocObserver);
+
       const note = notes.find(n => n.id === noteId);
       if (note) {
         noteTitleInput.value = note.title || '';
-        noteEditor.value = note.content || '';
-        renderPreview();
+        if (note.content && activeNoteText.length === 0) {
+          activeNoteText.insert(0, note.content);
+        }
       }
+
+      const contentRef = ref(db, `notebooks/${notebookToken}/noteContent/${noteId}`);
+      unsubNoteContent = onValue(contentRef, (snapshot) => {
+        const state = snapshot.val();
+        if (state) {
+          try {
+            Y.applyUpdate(activeNoteDoc, decodeBytes(state), REMOTE_UPDATE);
+          } catch (err) {
+            console.error('Invalid shared note state:', err);
+            showToast('Could not read shared note content.');
+          }
+        }
+        noteEditor.disabled = false;
+      }, (err) => {
+        console.error('Note content listener error:', err);
+        showToast('Note sync error: ' + err.message);
+      });
+
       renderNotesList();
       renderPresence();
       updateWorkspaceVisibility();
@@ -667,6 +798,7 @@
         emptyStateEl.classList.remove('hidden');
         workspaceEl.classList.add('hidden');
         noteTitleInput.disabled = true;
+        noteEditor.disabled = true;
       } else {
         emptyStateEl.classList.add('hidden');
         workspaceEl.classList.remove('hidden');
@@ -674,9 +806,94 @@
       }
     }
 
-    // --- Real-time Editing & Debounced Save ---
+    function encodeBytes(bytes) {
+      let binary = '';
+      for (let offset = 0; offset < bytes.length; offset += 0x8000) {
+        binary += String.fromCharCode(...bytes.subarray(offset, offset + 0x8000));
+      }
+      return btoa(binary);
+    }
+
+    function decodeBytes(encoded) {
+      const binary = atob(encoded);
+      return Uint8Array.from(binary, (character) => character.charCodeAt(0));
+    }
+
+    async function persistSharedState(noteId, doc) {
+      if (!noteId || !doc || !db) return;
+      const updateBytes = Y.encodeStateAsUpdate(doc);
+      const sessionToken = notebookToken;
+      const sessionNickname = nickname;
+      const contentRef = ref(db, `notebooks/${sessionToken}/noteContent/${noteId}`);
+      let saved = false;
+      try {
+        await runTransaction(contentRef, (currentState) => {
+          if (!currentState) return encodeBytes(updateBytes);
+          return encodeBytes(Y.mergeUpdates([decodeBytes(currentState), updateBytes]));
+        }, { applyLocally: false });
+        await update(ref(db, `notebooks/${sessionToken}/notes/${noteId}`), {
+          updatedAt: serverTimestamp(),
+          updatedBy: sessionNickname
+        });
+        saved = true;
+      } catch (err) {
+        console.error('Note content sync error:', err);
+        if (noteId === activeNoteId) syncStatusEl.textContent = 'error';
+        showToast('Could not sync note content: ' + err.message);
+      } finally {
+        if (saved && noteId === activeNoteId && !saveTimeout) syncStatusEl.textContent = 'synced';
+      }
+    }
+
+    async function persistNoteTitle(noteId, title) {
+      const sessionToken = notebookToken;
+      const sessionNickname = nickname;
+      try {
+        await update(ref(db, `notebooks/${sessionToken}/notes/${noteId}`), {
+          title,
+          updatedAt: serverTimestamp(),
+          updatedBy: sessionNickname
+        });
+        if (noteId === activeNoteId && !saveTimeout) syncStatusEl.textContent = 'synced';
+      } catch (err) {
+        console.error('Title save error:', err);
+        if (noteId === activeNoteId) syncStatusEl.textContent = 'error';
+        showToast('Could not save note title: ' + err.message);
+      }
+    }
+
+    function scheduleContentSave() {
+      const noteId = activeNoteIdForDoc;
+      const doc = activeNoteDoc;
+      if (!noteId || !doc) return;
+      syncStatusEl.textContent = 'saving...';
+      clearTimeout(saveTimeout);
+      saveTimeout = setTimeout(() => {
+        saveTimeout = null;
+        void persistSharedState(noteId, doc);
+      }, 300);
+    }
+
     function scheduleSave() {
-      if (!activeNoteId || !currentUser) return;
+      if (!activeNoteId || !db || !activeNoteText) return;
+      const previousContent = activeNoteText.toString();
+      const nextContent = noteEditor.value;
+      if (previousContent !== nextContent) {
+        let prefix = 0;
+        while (prefix < previousContent.length && prefix < nextContent.length &&
+          previousContent[prefix] === nextContent[prefix]) prefix++;
+        let suffix = 0;
+        while (suffix < previousContent.length - prefix && suffix < nextContent.length - prefix &&
+          previousContent[previousContent.length - 1 - suffix] === nextContent[nextContent.length - 1 - suffix]) suffix++;
+        activeNoteDoc.transact(() => {
+          if (previousContent.length - prefix - suffix > 0) {
+            activeNoteText.delete(prefix, previousContent.length - prefix - suffix);
+          }
+          const insertedText = nextContent.slice(prefix, nextContent.length - suffix);
+          if (insertedText) activeNoteText.insert(prefix, insertedText);
+        });
+      }
+
       syncStatusEl.textContent = 'saving...';
       isEditing = true;
       clearTimeout(editingTimeout);
@@ -685,21 +902,12 @@
         sendHeartbeat();
       }, 2000);
 
-      clearTimeout(saveTimeout);
-      saveTimeout = setTimeout(async () => {
-        try {
-          const noteRef = doc(db, 'artifacts', appId, 'public', 'data', 'org_notes', activeNoteId);
-          await updateDoc(noteRef, {
-            title: noteTitleInput.value.trim() || 'Untitled Note',
-            content: noteEditor.value,
-            updatedAt: Date.now(),
-            updatedBy: nickname
-          });
-          syncStatusEl.textContent = 'synced';
-        } catch (err) {
-          console.error('Save error:', err);
-          syncStatusEl.textContent = 'error';
-        }
+      clearTimeout(titleSaveTimeout);
+      const noteId = activeNoteId;
+      const title = noteTitleInput.value.trim() || 'Untitled Note';
+      titleSaveTimeout = setTimeout(async () => {
+        titleSaveTimeout = null;
+        await persistNoteTitle(noteId, title);
       }, 300);
 
       sendHeartbeat();
@@ -750,7 +958,7 @@
       notesListEl.innerHTML = '';
       notes.forEach((note) => {
         const isActive = note.id === activeNoteId;
-        const viewers = presenceList.filter(u => u.activeNoteId === note.id && u.userId !== currentUser?.uid);
+        const viewers = presenceList.filter(u => u.activeNoteId === note.id && u.userId !== clientId);
 
         const btn = document.createElement('button');
         btn.className = `w-full text-left px-2.5 py-2 rounded-lg text-sm font-mono flex items-center justify-between gap-2 transition-colors ${
@@ -796,13 +1004,13 @@
         chip.appendChild(dot);
 
         const name = document.createElement('span');
-        name.textContent = u.userId === currentUser?.uid ? `${u.nickname} (you)` : u.nickname;
+        name.textContent = u.userId === clientId ? `${u.nickname} (you)` : u.nickname;
         chip.appendChild(name);
         onlineUsersListEl.appendChild(chip);
       });
 
       // Active note presence
-      const noteUsers = presenceList.filter(u => u.activeNoteId === activeNoteId && u.userId !== currentUser?.uid);
+      const noteUsers = presenceList.filter(u => u.activeNoteId === activeNoteId && u.userId !== clientId);
       if (noteUsers.length === 0) {
         notePresenceEl.innerHTML = '';
         mobileNotePresenceEl.classList.add('hidden');
