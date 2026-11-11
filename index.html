@@ -1,0 +1,938 @@
+<!DOCTYPE html>
+<html lang="en" class="dark">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>OrgCollab — Minimal Collaborative Notes</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=JetBrains+Mono:ital,wght@0,400;0,500;0,600;1,400&display=swap" rel="stylesheet" />
+  <script>
+    tailwind.config = {
+      darkMode: 'class',
+      theme: {
+        extend: {
+          fontFamily: {
+            sans: ['Inter', 'system-ui', 'sans-serif'],
+            mono: ['JetBrains Mono', 'monospace'],
+          },
+          colors: {
+            bg: '#0d1117',
+            surface: '#161b22',
+            surfaceHover: '#1f242c',
+            border: '#262c36',
+            textMain: '#e6edf3',
+            textMuted: '#8b949e',
+            accent: '#58a6ff',
+            todo: '#f85149',
+            done: '#3fb950',
+            tag: '#d2a8ff',
+          }
+        }
+      }
+    };
+  </script>
+  <style>
+    * {
+      box-sizing: border-box;
+    }
+    body {
+      background-color: #0d1117;
+      color: #e6edf3;
+      font-family: 'Inter', system-ui, sans-serif;
+      margin: 0;
+      overflow: hidden;
+    }
+    /* Custom subtle scrollbars */
+    ::-webkit-scrollbar {
+      width: 6px;
+      height: 6px;
+    }
+    ::-webkit-scrollbar-track {
+      background: transparent;
+    }
+    ::-webkit-scrollbar-thumb {
+      background: #262c36;
+      border-radius: 3px;
+    }
+    ::-webkit-scrollbar-thumb:hover {
+      background: #3b434f;
+    }
+    /* Org-mode editor textarea */
+    #note-editor {
+      font-family: 'JetBrains Mono', monospace;
+      line-height: 1.65;
+      tab-size: 2;
+      resize: none;
+    }
+    #note-editor:focus {
+      outline: none;
+    }
+    /* Org-mode preview styling */
+    .org-preview {
+      font-family: 'JetBrains Mono', monospace;
+      line-height: 1.65;
+    }
+    .org-h1 {
+      font-size: 1.35rem;
+      font-weight: 600;
+      color: #79c0ff;
+      margin-top: 1.25rem;
+      margin-bottom: 0.5rem;
+      display: flex;
+      align-items: center;
+      gap: 0.5rem;
+      cursor: pointer;
+      user-select: none;
+    }
+    .org-h2 {
+      font-size: 1.15rem;
+      font-weight: 600;
+      color: #a5d6ff;
+      margin-top: 1rem;
+      margin-bottom: 0.4rem;
+      display: flex;
+      align-items: center;
+      gap: 0.5rem;
+      cursor: pointer;
+      user-select: none;
+    }
+    .org-h3 {
+      font-size: 1rem;
+      font-weight: 600;
+      color: #d2a8ff;
+      margin-top: 0.75rem;
+      margin-bottom: 0.3rem;
+      display: flex;
+      align-items: center;
+      gap: 0.5rem;
+      cursor: pointer;
+      user-select: none;
+    }
+    .org-todo {
+      background: rgba(248, 81, 73, 0.15);
+      color: #f85149;
+      border: 1px solid rgba(248, 81, 73, 0.4);
+      padding: 0.05rem 0.4rem;
+      border-radius: 4px;
+      font-size: 0.75rem;
+      font-weight: 600;
+      cursor: pointer;
+      transition: all 0.15s ease;
+    }
+    .org-todo:hover {
+      background: rgba(248, 81, 73, 0.25);
+    }
+    .org-done {
+      background: rgba(63, 185, 80, 0.15);
+      color: #3fb950;
+      border: 1px solid rgba(63, 185, 80, 0.4);
+      padding: 0.05rem 0.4rem;
+      border-radius: 4px;
+      font-size: 0.75rem;
+      font-weight: 600;
+      cursor: pointer;
+      transition: all 0.15s ease;
+    }
+    .org-done:hover {
+      background: rgba(63, 185, 80, 0.25);
+    }
+    .org-tag {
+      color: #d2a8ff;
+      background: rgba(210, 168, 255, 0.1);
+      padding: 0.05rem 0.35rem;
+      border-radius: 4px;
+      font-size: 0.8em;
+    }
+    .org-link {
+      color: #58a6ff;
+      text-decoration: underline;
+      text-decoration-style: dotted;
+      cursor: pointer;
+    }
+    .org-link:hover {
+      color: #79c0ff;
+    }
+    .org-bullet {
+      padding-left: 1.25rem;
+      position: relative;
+      margin: 0.2rem 0;
+    }
+    .org-bullet::before {
+      content: "•";
+      position: absolute;
+      left: 0.35rem;
+      color: #8b949e;
+    }
+    .org-code {
+      background: #161b22;
+      border: 1px solid #262c36;
+      padding: 0.1rem 0.35rem;
+      border-radius: 4px;
+      font-size: 0.9em;
+      color: #e6edf3;
+    }
+    .pulse-dot {
+      animation: pulse 2s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+    }
+    @keyframes pulse {
+      0%, 100% { opacity: 1; }
+      50% { opacity: 0.4; }
+    }
+  </style>
+</head>
+<body class="h-screen w-screen flex flex-col bg-bg text-textMain selection:bg-accent/30">
+
+  <!-- ==================== TOKEN GATE MODAL ==================== -->
+  <div id="token-gate" class="fixed inset-0 z-50 flex items-center justify-center bg-bg/95 backdrop-blur-sm p-4">
+    <div class="w-full max-w-md bg-surface border border-border rounded-xl p-6 shadow-2xl">
+      <div class="flex items-center gap-2.5 mb-2">
+        <span class="text-accent font-mono text-xl font-semibold">*</span>
+        <h1 class="text-lg font-semibold tracking-tight text-textMain">OrgCollab</h1>
+      </div>
+      <p class="text-sm text-textMuted mb-6">
+        Enter any shared notebook token to collaborate in real time. No account required.
+      </p>
+
+      <form id="token-form" class="space-y-4">
+        <div>
+          <label for="token-input" class="block text-xs font-medium text-textMuted uppercase tracking-wider mb-1.5">
+            Notebook Token <span class="text-todo">*</span>
+          </label>
+          <input
+            id="token-input"
+            type="text"
+            required
+            autocomplete="off"
+            placeholder="e.g. project-alpha, study-notes"
+            class="w-full bg-bg border border-border rounded-lg px-3.5 py-2.5 text-sm font-mono text-textMain placeholder-textMuted/50 focus:outline-none focus:border-accent transition-colors"
+          />
+        </div>
+
+        <div>
+          <label for="nickname-input" class="block text-xs font-medium text-textMuted uppercase tracking-wider mb-1.5">
+            Display Name <span class="text-textMuted/60 font-normal">(optional)</span>
+          </label>
+          <input
+            id="nickname-input"
+            type="text"
+            autocomplete="off"
+            placeholder="Leave empty for random (e.g. anon-42)"
+            class="w-full bg-bg border border-border rounded-lg px-3.5 py-2.5 text-sm font-mono text-textMain placeholder-textMuted/50 focus:outline-none focus:border-accent transition-colors"
+          />
+        </div>
+
+        <button
+          type="submit"
+          id="join-btn"
+          class="w-full bg-accent hover:bg-accent/90 text-bg font-medium text-sm py-2.5 rounded-lg transition-colors flex items-center justify-center gap-2"
+        >
+          <span>Open Notebook</span>
+          <span class="font-mono text-xs opacity-80">→</span>
+        </button>
+      </form>
+
+      <div id="gate-error" class="hidden mt-3 text-xs text-todo font-mono"></div>
+    </div>
+  </div>
+
+  <!-- ==================== MAIN APP SHELL ==================== -->
+  <div id="app-shell" class="hidden flex-1 flex h-full overflow-hidden">
+
+    <!-- Mobile Sidebar Backdrop -->
+    <div id="sidebar-backdrop" class="fixed inset-0 bg-black/60 z-30 hidden md:hidden"></div>
+
+    <!-- ==================== SIDEBAR ==================== -->
+    <aside id="sidebar" class="fixed md:static inset-y-0 left-0 z-40 w-64 bg-surface border-r border-border flex flex-col transform -translate-x-full md:translate-x-0 transition-transform duration-200 ease-out">
+      <!-- Notebook Header -->
+      <div class="h-12 px-4 border-b border-border flex items-center justify-between shrink-0">
+        <div class="flex items-center gap-2 min-w-0">
+          <span class="text-accent font-mono font-bold">*</span>
+          <span id="notebook-badge" class="font-mono text-sm font-medium truncate text-textMain" title="Current Notebook Token"></span>
+        </div>
+        <button id="switch-token-btn" title="Switch Notebook" class="text-xs text-textMuted hover:text-textMain px-2 py-1 rounded hover:bg-surfaceHover transition-colors font-mono">
+          switch
+        </button>
+      </div>
+
+      <!-- Notes List Header -->
+      <div class="px-4 py-2.5 flex items-center justify-between">
+        <span class="text-xs font-medium uppercase tracking-wider text-textMuted">Notes</span>
+        <button id="new-note-btn" title="New Note" class="w-6 h-6 flex items-center justify-center rounded hover:bg-surfaceHover text-textMuted hover:text-accent transition-colors font-mono text-base">
+          +
+        </button>
+      </div>
+
+      <!-- Notes List -->
+      <div id="notes-list" class="flex-1 overflow-y-auto px-2 space-y-0.5">
+        <!-- Populated dynamically -->
+      </div>
+
+      <!-- Online Users Section -->
+      <div class="border-t border-border p-3 bg-bg/40 shrink-0">
+        <div class="flex items-center justify-between mb-2">
+          <span class="text-xs font-medium uppercase tracking-wider text-textMuted flex items-center gap-1.5">
+            <span class="w-2 h-2 rounded-full bg-done pulse-dot"></span>
+            Online (<span id="online-count">0</span>)
+          </span>
+          <span id="my-nickname-badge" class="text-xs font-mono text-textMuted truncate max-w-[110px]"></span>
+        </div>
+        <div id="online-users-list" class="flex flex-wrap gap-1.5 max-h-24 overflow-y-auto">
+          <!-- Populated dynamically -->
+        </div>
+      </div>
+    </aside>
+
+    <!-- ==================== MAIN EDITOR AREA ==================== -->
+    <main class="flex-1 flex flex-col min-w-0 bg-bg">
+      <!-- Top Bar -->
+      <header class="h-12 px-3 sm:px-5 border-b border-border flex items-center justify-between gap-3 shrink-0">
+        <div class="flex items-center gap-2.5 min-w-0 flex-1">
+          <button id="mobile-menu-btn" class="md:hidden p-1.5 rounded hover:bg-surfaceHover text-textMuted hover:text-textMain">
+            <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6h16M4 12h16M4 18h16"/>
+            </svg>
+          </button>
+          <input
+            id="note-title-input"
+            type="text"
+            placeholder="Untitled Note"
+            class="bg-transparent text-sm sm:text-base font-medium text-textMain placeholder-textMuted/50 focus:outline-none truncate w-full font-mono"
+          />
+        </div>
+
+        <!-- Active Note Presence & Mode Toggles -->
+        <div class="flex items-center gap-3 shrink-0">
+          <!-- Who is viewing/editing this note -->
+          <div id="note-presence" class="hidden sm:flex items-center gap-1.5 text-xs font-mono text-textMuted">
+            <!-- Populated dynamically -->
+          </div>
+
+          <!-- Sync Status -->
+          <span id="sync-status" class="text-xs font-mono text-textMuted/70 hidden sm:inline">synced</span>
+
+          <!-- View Mode Toggle: Edit | Split | Preview -->
+          <div class="flex items-center bg-surface border border-border rounded-lg p-0.5 text-xs font-mono">
+            <button data-mode="edit" class="mode-btn px-2.5 py-1 rounded-md transition-colors text-textMain bg-surfaceHover">Edit</button>
+            <button data-mode="split" class="mode-btn hidden sm:block px-2.5 py-1 rounded-md transition-colors text-textMuted hover:text-textMain">Split</button>
+            <button data-mode="preview" class="mode-btn px-2.5 py-1 rounded-md transition-colors text-textMuted hover:text-textMain">Preview</button>
+          </div>
+        </div>
+      </header>
+
+      <!-- Mobile Note Presence Bar -->
+      <div id="mobile-note-presence" class="sm:hidden px-4 py-1.5 border-b border-border bg-surface/50 text-xs font-mono text-textMuted hidden">
+      </div>
+
+      <!-- Empty State (when no note is selected) -->
+      <div id="empty-state" class="hidden flex-1 flex flex-col items-center justify-center p-6 text-center">
+        <div class="text-3xl font-mono text-border mb-3">*</div>
+        <p class="text-sm text-textMuted mb-4">No note selected or notebook is empty.</p>
+        <button id="empty-new-note-btn" class="px-4 py-2 bg-surface hover:bg-surfaceHover border border-border rounded-lg text-sm font-mono text-accent transition-colors">
+          + Create First Note
+        </button>
+      </div>
+
+      <!-- Editor & Preview Workspace -->
+      <div id="workspace" class="flex-1 flex overflow-hidden">
+        <!-- Raw Org-mode Textarea -->
+        <div id="editor-pane" class="flex-1 flex flex-col min-w-0 h-full">
+          <textarea
+            id="note-editor"
+            spellcheck="false"
+            placeholder="* Heading 1&#10;** TODO Task item #tag&#10;- Bullet point&#10;Link to [[another-note]]"
+            class="flex-1 w-full h-full bg-bg text-textMain p-4 sm:p-6 text-sm focus:outline-none overflow-y-auto"
+          ></textarea>
+        </div>
+
+        <!-- Divider (for Split mode) -->
+        <div id="split-divider" class="hidden w-px bg-border shrink-0"></div>
+
+        <!-- Live Org-mode Preview -->
+        <div id="preview-pane" class="hidden flex-1 overflow-y-auto p-4 sm:p-6 bg-bg/50">
+          <div id="org-preview-content" class="org-preview text-sm max-w-3xl"></div>
+        </div>
+      </div>
+    </main>
+  </div>
+
+  <!-- ==================== CUSTOM TOAST / MESSAGE ==================== -->
+  <div id="toast" class="fixed bottom-4 right-4 z-50 hidden bg-surface border border-border text-textMain text-xs font-mono px-3.5 py-2 rounded-lg shadow-lg"></div>
+
+  <!-- ==================== FIREBASE & APP LOGIC ==================== -->
+  <script type="module">
+    import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
+    import { getAuth, signInAnonymously, signInWithCustomToken } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
+    import {
+      getFirestore,
+      collection,
+      doc,
+      addDoc,
+      setDoc,
+      updateDoc,
+      onSnapshot
+    } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+
+    // --- Environment & Firebase Setup ---
+    const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
+    const firebaseConfig = typeof __firebase_config !== 'undefined' ? JSON.parse(__firebase_config) : null;
+
+    let app, auth, db;
+    let currentUser = null;
+
+    // --- App State ---
+    let notebookToken = '';
+    let nickname = '';
+    let userColor = '#58a6ff';
+    let notes = [];
+    let activeNoteId = null;
+    let presenceList = [];
+    let viewMode = 'edit'; // 'edit' | 'split' | 'preview'
+    let isEditing = false;
+    let editingTimeout = null;
+    let saveTimeout = null;
+    let heartbeatInterval = null;
+    let unsubNotes = null;
+    let unsubPresence = null;
+    let collapsedSections = new Set();
+
+    const USER_COLORS = ['#58a6ff', '#3fb950', '#d2a8ff', '#ffa657', '#ff7b72', '#79c0ff'];
+
+    // --- DOM Elements ---
+    const tokenGate = document.getElementById('token-gate');
+    const tokenForm = document.getElementById('token-form');
+    const tokenInput = document.getElementById('token-input');
+    const nicknameInput = document.getElementById('nickname-input');
+    const gateError = document.getElementById('gate-error');
+    const appShell = document.getElementById('app-shell');
+
+    const sidebar = document.getElementById('sidebar');
+    const sidebarBackdrop = document.getElementById('sidebar-backdrop');
+    const mobileMenuBtn = document.getElementById('mobile-menu-btn');
+    const notebookBadge = document.getElementById('notebook-badge');
+    const switchTokenBtn = document.getElementById('switch-token-btn');
+    const newNoteBtn = document.getElementById('new-note-btn');
+    const emptyNewNoteBtn = document.getElementById('empty-new-note-btn');
+    const notesListEl = document.getElementById('notes-list');
+    const onlineCountEl = document.getElementById('online-count');
+    const onlineUsersListEl = document.getElementById('online-users-list');
+    const myNicknameBadge = document.getElementById('my-nickname-badge');
+
+    const noteTitleInput = document.getElementById('note-title-input');
+    const noteEditor = document.getElementById('note-editor');
+    const notePresenceEl = document.getElementById('note-presence');
+    const mobileNotePresenceEl = document.getElementById('mobile-note-presence');
+    const syncStatusEl = document.getElementById('sync-status');
+    const emptyStateEl = document.getElementById('empty-state');
+    const workspaceEl = document.getElementById('workspace');
+    const editorPane = document.getElementById('editor-pane');
+    const splitDivider = document.getElementById('split-divider');
+    const previewPane = document.getElementById('preview-pane');
+    const orgPreviewContent = document.getElementById('org-preview-content');
+    const modeBtns = document.querySelectorAll('.mode-btn');
+    const toastEl = document.getElementById('toast');
+
+    // --- Helpers ---
+    function showToast(msg) {
+      toastEl.textContent = msg;
+      toastEl.classList.remove('hidden');
+      setTimeout(() => toastEl.classList.add('hidden'), 2500);
+    }
+
+    function generateRandomNickname() {
+      const num = Math.floor(10 + Math.random() * 90);
+      return `anon-${num}`;
+    }
+
+    function sanitizeToken(raw) {
+      return raw.trim().toLowerCase().replace(/[^a-z0-9_-]/g, '-');
+    }
+
+    function escapeHtml(str) {
+      return str
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;');
+    }
+
+    // --- Initialize Firebase Auth ---
+    async function initAuth() {
+      if (!firebaseConfig) {
+        gateError.textContent = 'Firebase configuration not found.';
+        gateError.classList.remove('hidden');
+        return false;
+      }
+      try {
+        app = initializeApp(firebaseConfig);
+        auth = getAuth(app);
+        db = getFirestore(app);
+
+        if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) {
+          await signInWithCustomToken(auth, __initial_auth_token);
+        } else {
+          await signInAnonymously(auth);
+        }
+        currentUser = auth.currentUser;
+        return !!currentUser;
+      } catch (err) {
+        console.error('Auth error:', err);
+        gateError.textContent = 'Failed to connect: ' + err.message;
+        gateError.classList.remove('hidden');
+        return false;
+      }
+    }
+
+    // --- Token Gate Submission ---
+    tokenForm.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const rawToken = tokenInput.value;
+      if (!rawToken.trim()) return;
+
+      notebookToken = sanitizeToken(rawToken);
+      nickname = nicknameInput.value.trim() || generateRandomNickname();
+      userColor = USER_COLORS[Math.floor(Math.random() * USER_COLORS.length)];
+
+      if (!currentUser) {
+        const ok = await initAuth();
+        if (!ok) return;
+      }
+
+      tokenGate.classList.add('hidden');
+      appShell.classList.remove('hidden');
+      notebookBadge.textContent = notebookToken;
+      myNicknameBadge.textContent = nickname;
+
+      startNotebookSession();
+    });
+
+    switchTokenBtn.addEventListener('click', () => {
+      cleanupSession();
+      appShell.classList.add('hidden');
+      tokenGate.classList.remove('hidden');
+      tokenInput.focus();
+    });
+
+    // --- Mobile Sidebar Toggle ---
+    function toggleSidebar(open) {
+      if (open) {
+        sidebar.classList.remove('-translate-x-full');
+        sidebarBackdrop.classList.remove('hidden');
+      } else {
+        sidebar.classList.add('-translate-x-full');
+        sidebarBackdrop.classList.add('hidden');
+      }
+    }
+    mobileMenuBtn.addEventListener('click', () => toggleSidebar(true));
+    sidebarBackdrop.addEventListener('click', () => toggleSidebar(false));
+
+    // --- Session & Firestore Listeners ---
+    function cleanupSession() {
+      if (unsubNotes) unsubNotes();
+      if (unsubPresence) unsubPresence();
+      if (heartbeatInterval) clearInterval(heartbeatInterval);
+      notes = [];
+      presenceList = [];
+      activeNoteId = null;
+    }
+
+    function startNotebookSession() {
+      if (!currentUser) return;
+
+      // 1. Subscribe to Notes
+      const notesRef = collection(db, 'artifacts', appId, 'public', 'data', 'org_notes');
+      unsubNotes = onSnapshot(notesRef, (snapshot) => {
+        const allNotes = [];
+        snapshot.forEach((docSnap) => {
+          const data = docSnap.data();
+          if (data.notebookId === notebookToken) {
+            allNotes.push({ id: docSnap.id, ...data });
+          }
+        });
+        // Sort by updatedAt descending in JS
+        allNotes.sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0));
+        notes = allNotes;
+
+        // Auto-select first note if none selected
+        if (!activeNoteId && notes.length > 0) {
+          selectNote(notes[0].id);
+        } else if (activeNoteId) {
+          const current = notes.find(n => n.id === activeNoteId);
+          if (current) {
+            // Update editor only if we are not actively typing right now, or if it's a remote update
+            if (document.activeElement !== noteTitleInput && noteTitleInput.value !== current.title) {
+              noteTitleInput.value = current.title || '';
+            }
+            if (!isEditing && noteEditor.value !== current.content) {
+              const cursorPos = noteEditor.selectionStart;
+              noteEditor.value = current.content || '';
+              noteEditor.setSelectionRange(cursorPos, cursorPos);
+              renderPreview();
+            }
+          } else {
+            activeNoteId = notes.length > 0 ? notes[0].id : null;
+            if (activeNoteId) selectNote(activeNoteId);
+          }
+        }
+        renderNotesList();
+        updateWorkspaceVisibility();
+      }, (err) => {
+        console.error('Notes listener error:', err);
+        showToast('Sync error: ' + err.message);
+      });
+
+      // 2. Subscribe to Presence
+      const presenceRef = collection(db, 'artifacts', appId, 'public', 'data', 'org_presence');
+      unsubPresence = onSnapshot(presenceRef, (snapshot) => {
+        const now = Date.now();
+        const activeUsers = [];
+        snapshot.forEach((docSnap) => {
+          const data = docSnap.data();
+          if (data.notebookId === notebookToken && (now - (data.lastSeen || 0) < 25000)) {
+            activeUsers.push(data);
+          }
+        });
+        presenceList = activeUsers;
+        renderPresence();
+        renderNotesList();
+      }, (err) => {
+        console.error('Presence listener error:', err);
+      });
+
+      // 3. Start Heartbeat
+      sendHeartbeat();
+      heartbeatInterval = setInterval(sendHeartbeat, 8000);
+    }
+
+    async function sendHeartbeat() {
+      if (!currentUser || !notebookToken) return;
+      try {
+        const presenceDocId = `${notebookToken}_${currentUser.uid}`;
+        const presenceDocRef = doc(db, 'artifacts', appId, 'public', 'data', 'org_presence', presenceDocId);
+        await setDoc(presenceDocRef, {
+          notebookId: notebookToken,
+          userId: currentUser.uid,
+          nickname,
+          color: userColor,
+          activeNoteId: activeNoteId || null,
+          isEditing,
+          lastSeen: Date.now()
+        });
+      } catch (err) {
+        console.error('Heartbeat error:', err);
+      }
+    }
+
+    // --- Note CRUD ---
+    async function createNewNote(customTitle = 'Untitled Note') {
+      if (!currentUser) return;
+      try {
+        const notesRef = collection(db, 'artifacts', appId, 'public', 'data', 'org_notes');
+        const newDoc = await addDoc(notesRef, {
+          notebookId: notebookToken,
+          title: customTitle,
+          content: `* ${customTitle}\n** TODO First task #notes\n- Write your thoughts here\n`,
+          updatedAt: Date.now(),
+          updatedBy: nickname
+        });
+        selectNote(newDoc.id);
+        toggleSidebar(false);
+        noteTitleInput.focus();
+      } catch (err) {
+        console.error('Create note error:', err);
+        showToast('Could not create note');
+      }
+    }
+
+    newNoteBtn.addEventListener('click', () => createNewNote());
+    emptyNewNoteBtn.addEventListener('click', () => createNewNote());
+
+    function selectNote(noteId) {
+      activeNoteId = noteId;
+      const note = notes.find(n => n.id === noteId);
+      if (note) {
+        noteTitleInput.value = note.title || '';
+        noteEditor.value = note.content || '';
+        renderPreview();
+      }
+      renderNotesList();
+      renderPresence();
+      updateWorkspaceVisibility();
+      sendHeartbeat();
+      toggleSidebar(false);
+    }
+
+    function updateWorkspaceVisibility() {
+      if (notes.length === 0 || !activeNoteId) {
+        emptyStateEl.classList.remove('hidden');
+        workspaceEl.classList.add('hidden');
+        noteTitleInput.disabled = true;
+      } else {
+        emptyStateEl.classList.add('hidden');
+        workspaceEl.classList.remove('hidden');
+        noteTitleInput.disabled = false;
+      }
+    }
+
+    // --- Real-time Editing & Debounced Save ---
+    function scheduleSave() {
+      if (!activeNoteId || !currentUser) return;
+      syncStatusEl.textContent = 'saving...';
+      isEditing = true;
+      clearTimeout(editingTimeout);
+      editingTimeout = setTimeout(() => {
+        isEditing = false;
+        sendHeartbeat();
+      }, 2000);
+
+      clearTimeout(saveTimeout);
+      saveTimeout = setTimeout(async () => {
+        try {
+          const noteRef = doc(db, 'artifacts', appId, 'public', 'data', 'org_notes', activeNoteId);
+          await updateDoc(noteRef, {
+            title: noteTitleInput.value.trim() || 'Untitled Note',
+            content: noteEditor.value,
+            updatedAt: Date.now(),
+            updatedBy: nickname
+          });
+          syncStatusEl.textContent = 'synced';
+        } catch (err) {
+          console.error('Save error:', err);
+          syncStatusEl.textContent = 'error';
+        }
+      }, 300);
+
+      sendHeartbeat();
+    }
+
+    noteTitleInput.addEventListener('input', scheduleSave);
+    noteEditor.addEventListener('input', () => {
+      scheduleSave();
+      if (viewMode === 'split' || viewMode === 'preview') {
+        renderPreview();
+      }
+    });
+
+    // --- View Mode Switching ---
+    modeBtns.forEach((btn) => {
+      btn.addEventListener('click', () => {
+        viewMode = btn.dataset.mode;
+        modeBtns.forEach(b => {
+          if (b.dataset.mode === viewMode) {
+            b.classList.add('text-textMain', 'bg-surfaceHover');
+            b.classList.remove('text-textMuted');
+          } else {
+            b.classList.remove('text-textMain', 'bg-surfaceHover');
+            b.classList.add('text-textMuted');
+          }
+        });
+
+        if (viewMode === 'edit') {
+          editorPane.classList.remove('hidden');
+          splitDivider.classList.add('hidden');
+          previewPane.classList.add('hidden');
+        } else if (viewMode === 'split') {
+          editorPane.classList.remove('hidden');
+          splitDivider.classList.remove('hidden');
+          previewPane.classList.remove('hidden');
+          renderPreview();
+        } else if (viewMode === 'preview') {
+          editorPane.classList.add('hidden');
+          splitDivider.classList.add('hidden');
+          previewPane.classList.remove('hidden');
+          renderPreview();
+        }
+      });
+    });
+
+    // --- Render Sidebar Notes ---
+    function renderNotesList() {
+      notesListEl.innerHTML = '';
+      notes.forEach((note) => {
+        const isActive = note.id === activeNoteId;
+        const viewers = presenceList.filter(u => u.activeNoteId === note.id && u.userId !== currentUser?.uid);
+
+        const btn = document.createElement('button');
+        btn.className = `w-full text-left px-2.5 py-2 rounded-lg text-sm font-mono flex items-center justify-between gap-2 transition-colors ${
+          isActive
+            ? 'bg-surfaceHover text-textMain border border-border/60'
+            : 'text-textMuted hover:text-textMain hover:bg-surfaceHover/50'
+        }`;
+        btn.onclick = () => selectNote(note.id);
+
+        const titleSpan = document.createElement('span');
+        titleSpan.className = 'truncate';
+        titleSpan.textContent = note.title || 'Untitled Note';
+        btn.appendChild(titleSpan);
+
+        if (viewers.length > 0) {
+          const dotsWrap = document.createElement('div');
+          dotsWrap.className = 'flex items-center -space-x-1 shrink-0';
+          viewers.slice(0, 3).forEach(v => {
+            const dot = document.createElement('span');
+            dot.className = 'w-2 h-2 rounded-full ring-1 ring-surface';
+            dot.style.backgroundColor = v.color || '#58a6ff';
+            dot.title = `${v.nickname} (${v.isEditing ? 'editing' : 'viewing'})`;
+            dotsWrap.appendChild(dot);
+          });
+          btn.appendChild(dotsWrap);
+        }
+
+        notesListEl.appendChild(btn);
+      });
+    }
+
+    // --- Render Presence ---
+    function renderPresence() {
+      onlineCountEl.textContent = presenceList.length;
+      onlineUsersListEl.innerHTML = '';
+
+      presenceList.forEach((u) => {
+        const chip = document.createElement('span');
+        chip.className = 'inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-xs font-mono bg-surface border border-border text-textMain';
+        const dot = document.createElement('span');
+        dot.className = 'w-1.5 h-1.5 rounded-full';
+        dot.style.backgroundColor = u.color || '#58a6ff';
+        chip.appendChild(dot);
+
+        const name = document.createElement('span');
+        name.textContent = u.userId === currentUser?.uid ? `${u.nickname} (you)` : u.nickname;
+        chip.appendChild(name);
+        onlineUsersListEl.appendChild(chip);
+      });
+
+      // Active note presence
+      const noteUsers = presenceList.filter(u => u.activeNoteId === activeNoteId && u.userId !== currentUser?.uid);
+      if (noteUsers.length === 0) {
+        notePresenceEl.innerHTML = '';
+        mobileNotePresenceEl.classList.add('hidden');
+      } else {
+        const editingUsers = noteUsers.filter(u => u.isEditing);
+        let text = '';
+        if (editingUsers.length > 0) {
+          text = `${editingUsers.map(u => u.nickname).join(', ')} editing...`;
+        } else {
+          text = `${noteUsers.map(u => u.nickname).join(', ')} viewing`;
+        }
+        notePresenceEl.innerHTML = `<span class="w-2 h-2 rounded-full bg-accent pulse-dot"></span><span>${escapeHtml(text)}</span>`;
+        mobileNotePresenceEl.textContent = text;
+        mobileNotePresenceEl.classList.remove('hidden');
+      }
+    }
+
+    // --- Org-Mode Parser & Interactive Preview ---
+    function formatInlineOrg(text) {
+      let html = escapeHtml(text);
+      // Inline code =code= or ~code~
+      html = html.replace(/([=~])([^=~]+)\1/g, '<code class="org-code">$2</code>');
+      // Tags #tag
+      html = html.replace(/(^|\s)(#[a-zA-Z0-9_-]+)/g, '$1<span class="org-tag">$2</span>');
+      // Wiki links [[note-title]]
+      html = html.replace(/\[\[([^\]]+)\]\]/g, '<span class="org-link" data-link="$1">[[$1]]</span>');
+      return html;
+    }
+
+    function renderPreview() {
+      const lines = noteEditor.value.split('\n');
+      let html = '';
+      let skipLevel = null;
+
+      lines.forEach((line, idx) => {
+        const headingMatch = line.match(/^(\*{1,3})\s+(.*)$/);
+        if (headingMatch) {
+          const level = headingMatch[1].length;
+          if (skipLevel !== null && level <= skipLevel) {
+            skipLevel = null;
+          }
+          if (skipLevel !== null) return;
+
+          const isCollapsed = collapsedSections.has(idx);
+          const headingClass = level === 1 ? 'org-h1' : level === 2 ? 'org-h2' : 'org-h3';
+          let content = headingMatch[2];
+
+          // Check for TODO / DONE
+          let statusBadge = '';
+          if (content.startsWith('TODO ')) {
+            statusBadge = `<span class="org-todo" data-line="${idx}" data-status="TODO">TODO</span>`;
+            content = content.slice(5);
+          } else if (content.startsWith('DONE ')) {
+            statusBadge = `<span class="org-done" data-line="${idx}" data-status="DONE">DONE</span>`;
+            content = content.slice(5);
+          }
+
+          const arrow = isCollapsed ? '▸' : '▾';
+          html += `<div class="${headingClass}" data-heading-line="${idx}">
+            <span class="text-textMuted text-xs">${arrow}</span>
+            ${statusBadge}
+            <span>${formatInlineOrg(content)}</span>
+          </div>`;
+
+          if (isCollapsed) {
+            skipLevel = level;
+          }
+          return;
+        }
+
+        if (skipLevel !== null) return;
+
+        // Bullet list
+        const bulletMatch = line.match(/^\s*[-+]\s+(.*)$/);
+        if (bulletMatch) {
+          html += `<div class="org-bullet text-textMain/90">${formatInlineOrg(bulletMatch[1])}</div>`;
+          return;
+        }
+
+        // Empty line
+        if (line.trim() === '') {
+          html += `<div class="h-3"></div>`;
+          return;
+        }
+
+        // Normal paragraph
+        html += `<p class="text-textMain/90 my-1">${formatInlineOrg(line)}</p>`;
+      });
+
+      orgPreviewContent.innerHTML = html || '<p class="text-textMuted italic">Empty note...</p>';
+
+      // Attach interactive listeners in preview
+      orgPreviewContent.querySelectorAll('[data-status]').forEach(el => {
+        el.addEventListener('click', (e) => {
+          e.stopPropagation();
+          const lineIdx = parseInt(el.dataset.line, 10);
+          const currentStatus = el.dataset.status;
+          const nextStatus = currentStatus === 'TODO' ? 'DONE' : 'TODO';
+          const linesArr = noteEditor.value.split('\n');
+          linesArr[lineIdx] = linesArr[lineIdx].replace(currentStatus, nextStatus);
+          noteEditor.value = linesArr.join('\n');
+          renderPreview();
+          scheduleSave();
+        });
+      });
+
+      orgPreviewContent.querySelectorAll('[data-heading-line]').forEach(el => {
+        el.addEventListener('click', () => {
+          const lineIdx = parseInt(el.dataset.headingLine, 10);
+          if (collapsedSections.has(lineIdx)) {
+            collapsedSections.delete(lineIdx);
+          } else {
+            collapsedSections.add(lineIdx);
+          }
+          renderPreview();
+        });
+      });
+
+      orgPreviewContent.querySelectorAll('[data-link]').forEach(el => {
+        el.addEventListener('click', () => {
+          const targetTitle = el.dataset.link.trim();
+          const existing = notes.find(n => (n.title || '').toLowerCase() === targetTitle.toLowerCase());
+          if (existing) {
+            selectNote(existing.id);
+          } else {
+            createNewNote(targetTitle);
+          }
+        });
+      });
+    }
+  </script>
+</body>
+</html>
