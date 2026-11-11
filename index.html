@@ -723,7 +723,35 @@
         const noteRef = push(ref(db, `notebooks/${notebookToken}/notes`));
         const noteId = noteRef.key;
         const title = customTitle.trim() || 'Untitled Note';
-        const initialContent = `* ${title}\n** TODO First task #notes\n- Write your thoughts here\n`;
+        const initialContent = `* ${title}
+Quick reference for the Org-style syntax supported in this notebook.
+
+** Headings
+Start a line with stars to make a heading. One to three levels are supported.
+*** Third-level heading
+Click a heading in Preview to collapse or expand its section.
+
+** Tasks
+Put TODO or DONE after the heading stars. Click the status in Preview to toggle it.
+** TODO Plan the next step
+** DONE Review these examples
+
+** Lists
+Start a line with - or + followed by a space.
+- First item
++ Another item
+
+** Inline syntax
+Wrap text in =equals= or ~tildes~ to show inline code.
+Add a #tag to label a note or task.
+
+** Links between notes
+Write [[Another Note]] to link to a note. In Preview, click the link to open it or create it.
+
+** Paragraphs
+Ordinary lines are displayed as text. Leave a blank line to separate sections.
+Edit or replace this reference with your own notes.
+`;
         const initialDoc = new Y.Doc();
         initialDoc.getText('content').insert(0, initialContent);
         const encodedState = encodeBytes(Y.encodeStateAsUpdate(initialDoc));
