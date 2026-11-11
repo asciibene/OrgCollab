@@ -624,7 +624,7 @@
     function startNotebookSession() {
       const notesRef = ref(db, `notebooks/${notebookToken}/notes`);
       const presenceRef = ref(db, `notebooks/${notebookToken}/presence`);
-      myPresenceRef = ref(presenceRef, clientId);
+      myPresenceRef = ref(db, `notebooks/${notebookToken}/presence/${clientId}`);
 
       unsubNotes = onValue(notesRef, (snapshot) => {
         const allNotes = [];
