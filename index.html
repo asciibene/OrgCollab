@@ -392,6 +392,7 @@
 
     let app;
     let db;
+    let notebookStartupStage = 'not started';
     let clientId = sessionStorage.getItem('orgcollab-client-id');
     if (!clientId) {
       clientId = globalThis.crypto?.randomUUID?.() || `client-${Date.now()}-${Math.random().toString(36).slice(2)}`;
@@ -538,10 +539,10 @@
       try {
         startNotebookSession();
       } catch (err) {
-        console.error('Notebook startup error:', err);
+        console.error(`Notebook startup error while ${notebookStartupStage}:`, err);
         appShell.classList.add('hidden');
         tokenGate.classList.remove('hidden');
-        gateError.textContent = `Could not open notebook: ${err.message}`;
+        gateError.textContent = `Could not open notebook while ${notebookStartupStage}: ${err.message}`;
         gateError.classList.remove('hidden');
       }
     }
@@ -622,10 +623,14 @@
     }
 
     function startNotebookSession() {
+      notebookStartupStage = 'creating the notes reference';
       const notesRef = ref(db, `notebooks/${notebookToken}/notes`);
+      notebookStartupStage = 'creating the presence reference';
       const presenceRef = ref(db, `notebooks/${notebookToken}/presence`);
+      notebookStartupStage = 'creating your presence reference';
       myPresenceRef = ref(db, `notebooks/${notebookToken}/presence/${clientId}`);
 
+      notebookStartupStage = 'subscribing to notes';
       unsubNotes = onValue(notesRef, (snapshot) => {
         const allNotes = [];
         snapshot.forEach((noteSnapshot) => {
@@ -654,6 +659,7 @@
         showToast('Sync error: ' + err.message);
       });
 
+      notebookStartupStage = 'subscribing to presence';
       unsubPresence = onValue(presenceRef, (snapshot) => {
         const now = Date.now();
         const activeUsers = [];
@@ -670,6 +676,7 @@
       });
 
       const connectedRef = ref(db, '.info/connected');
+      notebookStartupStage = 'subscribing to connection status';
       unsubConnection = onValue(connectedRef, async (snapshot) => {
         if (snapshot.val() !== true) {
           syncStatusEl.textContent = 'offline';
@@ -688,6 +695,7 @@
         console.error('Connection listener error:', err);
         showToast('Connection error: ' + err.message);
       });
+      notebookStartupStage = 'waiting for Firebase';
     }
 
     async function sendHeartbeat() {
