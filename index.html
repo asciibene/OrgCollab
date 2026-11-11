@@ -407,6 +407,7 @@
     let activeNoteId = null;
     let presenceList = [];
     let viewMode = 'edit'; // 'edit' | 'split' | 'preview'
+    const deletedNoteIds = new Set();
     let isEditing = false;
     let editingTimeout = null;
     let saveTimeout = null;
@@ -605,6 +606,7 @@
         remove(myPresenceRef).catch((err) => console.error('Presence cleanup error:', err));
       }
       notes = [];
+      deletedNoteIds.clear();
       presenceList = [];
       activeNoteId = null;
       activeNoteIdForDoc = null;
@@ -749,6 +751,57 @@
     newNoteBtn.addEventListener('click', () => createNewNote());
     emptyNewNoteBtn.addEventListener('click', () => createNewNote());
 
+    async function deleteNote(note) {
+      if (deletedNoteIds.has(note.id)) return;
+      const title = note.title || 'Untitled Note';
+      if (!window.confirm(`Delete "${title}" from this token room? This removes it for everyone and cannot be undone.`)) {
+        return;
+      }
+
+      deletedNoteIds.add(note.id);
+      renderNotesList();
+      if (note.id === activeNoteId) {
+        clearTimeout(saveTimeout);
+        saveTimeout = null;
+        clearTimeout(titleSaveTimeout);
+        titleSaveTimeout = null;
+        clearTimeout(editingTimeout);
+        editingTimeout = null;
+        if (unsubNoteContent) unsubNoteContent();
+        unsubNoteContent = null;
+        if (activeNoteDoc && activeNoteDocObserver) {
+          activeNoteDoc.off('update', activeNoteDocObserver);
+          activeNoteDoc.destroy();
+        }
+        activeNoteId = null;
+        activeNoteIdForDoc = null;
+        activeNoteDoc = null;
+        activeNoteText = null;
+        activeNoteDocObserver = null;
+        noteTitleInput.value = '';
+        noteEditor.value = '';
+        noteEditor.disabled = true;
+        isEditing = false;
+        updateWorkspaceVisibility();
+        sendHeartbeat();
+      }
+
+      try {
+        await update(ref(db), {
+          [`notebooks/${notebookToken}/notes/${note.id}`]: null,
+          [`notebooks/${notebookToken}/noteContent/${note.id}`]: null
+        });
+        showToast('Note deleted from this token room.');
+      } catch (err) {
+        deletedNoteIds.delete(note.id);
+        console.error('Delete note error:', err);
+        showToast('Could not delete note: ' + err.message);
+        if (note.id === activeNoteId || (!activeNoteId && notes.some((item) => item.id === note.id))) {
+          selectNote(note.id);
+        }
+      }
+    }
+
     function selectNote(noteId) {
       if (activeNoteIdForDoc && activeNoteDoc) {
         clearTimeout(saveTimeout);
@@ -856,7 +909,7 @@
     }
 
     async function persistSharedState(noteId, doc) {
-      if (!noteId || !doc || !db) return;
+      if (!noteId || !doc || !db || deletedNoteIds.has(noteId)) return;
       const updateBytes = Y.encodeStateAsUpdate(doc);
       const sessionToken = notebookToken;
       const sessionNickname = nickname;
@@ -867,6 +920,7 @@
           if (!currentState) return encodeBytes(updateBytes);
           return encodeBytes(Y.mergeUpdates([decodeBytes(currentState), updateBytes]));
         }, { applyLocally: false });
+        if (deletedNoteIds.has(noteId)) return;
         await update(ref(db, `notebooks/${sessionToken}/notes/${noteId}`), {
           updatedAt: serverTimestamp(),
           updatedBy: sessionNickname
@@ -882,6 +936,7 @@
     }
 
     async function persistNoteTitle(noteId, title) {
+      if (deletedNoteIds.has(noteId)) return;
       const sessionToken = notebookToken;
       const sessionNickname = nickname;
       try {
@@ -901,7 +956,7 @@
     function scheduleContentSave() {
       const noteId = activeNoteIdForDoc;
       const doc = activeNoteDoc;
-      if (!noteId || !doc) return;
+      if (!noteId || !doc || deletedNoteIds.has(noteId)) return;
       syncStatusEl.textContent = 'saving...';
       clearTimeout(saveTimeout);
       saveTimeout = setTimeout(() => {
@@ -911,7 +966,7 @@
     }
 
     function scheduleSave() {
-      if (!activeNoteId || !db || !activeNoteText) return;
+      if (!activeNoteId || !db || !activeNoteText || deletedNoteIds.has(activeNoteId)) return;
       const previousContent = activeNoteText.toString();
       const nextContent = noteEditor.value;
       if (previousContent !== nextContent) {
@@ -996,8 +1051,12 @@
         const isActive = note.id === activeNoteId;
         const viewers = presenceList.filter(u => u.activeNoteId === note.id && u.userId !== clientId);
 
+        const row = document.createElement('div');
+        row.className = 'group flex items-center gap-1';
+
         const btn = document.createElement('button');
-        btn.className = `w-full text-left px-2.5 py-2 rounded-lg text-sm font-mono flex items-center justify-between gap-2 transition-colors ${
+        btn.type = 'button';
+        btn.className = `min-w-0 flex-1 text-left px-2.5 py-2 rounded-lg text-sm font-mono flex items-center justify-between gap-2 transition-colors ${
           isActive
             ? 'bg-surfaceHover text-textMain border border-border/60'
             : 'text-textMuted hover:text-textMain hover:bg-surfaceHover/50'
@@ -1022,7 +1081,20 @@
           btn.appendChild(dotsWrap);
         }
 
-        notesListEl.appendChild(btn);
+        const deleteBtn = document.createElement('button');
+        deleteBtn.type = 'button';
+        deleteBtn.className = 'w-7 h-7 shrink-0 inline-flex items-center justify-center rounded text-textMuted/70 hover:text-todo hover:bg-surfaceHover focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-todo disabled:opacity-40 disabled:cursor-not-allowed transition-colors';
+        deleteBtn.title = `Delete ${note.title || 'Untitled Note'}`;
+        deleteBtn.setAttribute('aria-label', `Delete ${note.title || 'Untitled Note'}`);
+        deleteBtn.innerHTML = '<svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.8" d="M4 7h16M10 11v6m4-6v6M5 7l1 13h12l1-13M9 7V4h6v3"/></svg>';
+        deleteBtn.disabled = deletedNoteIds.has(note.id);
+        deleteBtn.onclick = (event) => {
+          event.stopPropagation();
+          void deleteNote(note);
+        };
+        row.appendChild(btn);
+        row.appendChild(deleteBtn);
+        notesListEl.appendChild(row);
       });
     }
 
