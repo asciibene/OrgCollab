@@ -238,6 +238,20 @@
     </div>
   </div>
 
+  <script>
+    window.orgCollabAppReady = false;
+    document.getElementById('token-form').addEventListener('submit', (event) => {
+      event.preventDefault();
+    });
+    window.addEventListener('load', () => {
+      if (!window.orgCollabAppReady) {
+        const error = document.getElementById('gate-error');
+        error.textContent = 'The app could not start. Check your connection and reload; if it continues, check the browser console for a JavaScript module error.';
+        error.classList.remove('hidden');
+      }
+    }, { once: true });
+  </script>
+
   <!-- ==================== MAIN APP SHELL ==================== -->
   <div id="app-shell" class="hidden flex-1 flex h-full overflow-hidden">
 
@@ -521,7 +535,15 @@
       notebookBadge.textContent = notebookToken;
       myNicknameBadge.textContent = nickname;
 
-      startNotebookSession();
+      try {
+        startNotebookSession();
+      } catch (err) {
+        console.error('Notebook startup error:', err);
+        appShell.classList.add('hidden');
+        tokenGate.classList.remove('hidden');
+        gateError.textContent = `Could not open notebook: ${err.message}`;
+        gateError.classList.remove('hidden');
+      }
     });
 
     switchTokenBtn.addEventListener('click', () => {
@@ -1141,6 +1163,8 @@
         });
       });
     }
+
+    window.orgCollabAppReady = true;
   </script>
 </body>
 </html>
