@@ -38,6 +38,7 @@
     let titleSaveTimeout = null;
     let heartbeatInterval = null;
     let unsubNotes = null;
+    let unsubNoteDeletions = null;
     let unsubPresence = null;
     let unsubConnection = null;
     let unsubNoteContent = null;
@@ -224,10 +225,12 @@
     // --- Session & Realtime Database Listeners ---
     function cleanupSession() {
       if (unsubNotes) unsubNotes();
+      if (unsubNoteDeletions) unsubNoteDeletions();
       if (unsubPresence) unsubPresence();
       if (unsubConnection) unsubConnection();
       if (unsubNoteContent) unsubNoteContent();
       unsubNotes = null;
+      unsubNoteDeletions = null;
       unsubPresence = null;
       unsubConnection = null;
       unsubNoteContent = null;
@@ -274,6 +277,7 @@
     function startNotebookSession() {
       notebookStartupStage = 'creating the notes reference';
       const notesRef = ref(db, `notebooks/${notebookToken}/notes`);
+      const noteDeletionsRef = ref(db, `notebooks/${notebookToken}/noteDeletions`);
       notebookStartupStage = 'creating the presence reference';
       const presenceRef = ref(db, `notebooks/${notebookToken}/presence`);
       notebookStartupStage = 'creating your presence reference';
@@ -292,11 +296,6 @@
           for (const [id, note] of currentNotes) {
             if (!knownNotes.has(id)) {
               showToast(`New note created: ${note.title || 'Untitled Note'}`);
-            }
-          }
-          for (const [id, note] of knownNotes) {
-            if (!currentNotes.has(id)) {
-              showToast(`Note deleted: ${note.title || 'Untitled Note'}`);
             }
           }
         }
@@ -322,6 +321,25 @@
       }, (err) => {
         console.error('Notes listener error:', err);
         showToast('Sync error: ' + err.message);
+      });
+
+      let knownDeletionIds = null;
+      unsubNoteDeletions = onValue(noteDeletionsRef, (snapshot) => {
+        const currentDeletions = new Map();
+        snapshot.forEach((deletionSnapshot) => {
+          currentDeletions.set(deletionSnapshot.key, deletionSnapshot.val());
+        });
+        if (knownDeletionIds) {
+          for (const [id, deletion] of currentDeletions) {
+            if (!knownDeletionIds.has(id) && deletion.deletedByClientId !== clientId) {
+              showToast(`Note "${deletion.title || 'Untitled Note'}" deleted by ${deletion.deletedBy || 'Someone'}.`);
+            }
+          }
+        }
+        knownDeletionIds = new Set(currentDeletions.keys());
+      }, (err) => {
+        console.error('Note deletion listener error:', err);
+        showToast('Note deletion notification error: ' + err.message);
       });
 
       notebookStartupStage = 'subscribing to presence';
@@ -499,8 +517,15 @@ That's the full syntax guide. Try editing these examples, then make this note yo
       try {
         await update(ref(db), {
           [`notebooks/${notebookToken}/notes/${note.id}`]: null,
-          [`notebooks/${notebookToken}/noteContent/${note.id}`]: null
+          [`notebooks/${notebookToken}/noteContent/${note.id}`]: null,
+          [`notebooks/${notebookToken}/noteDeletions/${note.id}`]: {
+            title,
+            deletedBy: nickname,
+            deletedByClientId: clientId,
+            deletedAt: serverTimestamp()
+          }
         });
+        showToast(`Note "${title}" deleted by ${nickname}.`);
       } catch (err) {
         deletedNoteIds.delete(note.id);
         console.error('Delete note error:', err);
