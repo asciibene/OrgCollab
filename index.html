@@ -561,6 +561,12 @@
       tokenInput.focus();
     });
 
+    const linkedToken = new URLSearchParams(window.location.search).get('token');
+    if (linkedToken?.trim()) {
+      tokenInput.value = linkedToken;
+      openNotebook();
+    }
+
     // --- Mobile Sidebar Toggle ---
     function toggleSidebar(open) {
       if (open) {

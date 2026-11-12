@@ -39,3 +39,7 @@ Use Firebase's usage limits and alerts to monitor the free-tier database. This
 prototype uses Yjs to merge concurrent text edits and stores the merged state
 in Realtime Database; it is intended for small shared notebooks rather than
 large-scale or private collaboration.
+
+To open a room directly, add its token as the `token` query parameter, for
+example `https://your-site.example/?token=project-alpha`. Anyone with this
+link can read and edit that room.
