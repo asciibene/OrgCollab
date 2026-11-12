@@ -85,12 +85,29 @@
     const orgPreviewContent = document.getElementById('org-preview-content');
     const modeBtns = document.querySelectorAll('.mode-btn');
     const toastEl = document.getElementById('toast');
+    const toastQueue = [];
 
     // --- Helpers ---
     function showToast(msg) {
+      if (!toastEl.classList.contains('hidden')) {
+        toastQueue.push(msg);
+        return;
+      }
+
+      displayToast(msg);
+    }
+
+    function displayToast(msg) {
       toastEl.textContent = msg;
       toastEl.classList.remove('hidden');
-      setTimeout(() => toastEl.classList.add('hidden'), 2500);
+      setTimeout(() => {
+        const nextMessage = toastQueue.shift();
+        if (nextMessage) {
+          displayToast(nextMessage);
+        } else {
+          toastEl.classList.add('hidden');
+        }
+      }, 2500);
     }
 
     function generateRandomNickname() {
@@ -261,6 +278,8 @@
       const presenceRef = ref(db, `notebooks/${notebookToken}/presence`);
       notebookStartupStage = 'creating your presence reference';
       myPresenceRef = ref(db, `notebooks/${notebookToken}/presence/${clientId}`);
+      let knownNotes = null;
+      let knownPresence = null;
 
       notebookStartupStage = 'subscribing to notes';
       unsubNotes = onValue(notesRef, (snapshot) => {
@@ -268,6 +287,20 @@
         snapshot.forEach((noteSnapshot) => {
           allNotes.push({ id: noteSnapshot.key, ...noteSnapshot.val() });
         });
+        const currentNotes = new Map(allNotes.map((note) => [note.id, note]));
+        if (knownNotes) {
+          for (const [id, note] of currentNotes) {
+            if (!knownNotes.has(id)) {
+              showToast(`New note created: ${note.title || 'Untitled Note'}`);
+            }
+          }
+          for (const [id, note] of knownNotes) {
+            if (!currentNotes.has(id)) {
+              showToast(`Note deleted: ${note.title || 'Untitled Note'}`);
+            }
+          }
+        }
+        knownNotes = currentNotes;
         allNotes.sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0));
         notes = allNotes;
 
@@ -294,12 +327,27 @@
       notebookStartupStage = 'subscribing to presence';
       unsubPresence = onValue(presenceRef, (snapshot) => {
         const now = Date.now();
-        const activeUsers = [];
+        const activeUsersById = new Map();
         snapshot.forEach((userSnapshot) => {
           const data = userSnapshot.val();
-          if (now - (data.lastSeen || 0) < 30000) activeUsers.push(data);
+          if (now - (data.lastSeen || 0) < 30000) {
+            activeUsersById.set(userSnapshot.key, data);
+          }
         });
-        presenceList = activeUsers;
+        if (knownPresence) {
+          for (const [id, user] of activeUsersById) {
+            if (id !== clientId && !knownPresence.has(id)) {
+              showToast(`${user.nickname || 'Someone'} joined the token room.`);
+            }
+          }
+          for (const [id, user] of knownPresence) {
+            if (id !== clientId && !activeUsersById.has(id)) {
+              showToast(`${user.nickname || 'Someone'} left the token room.`);
+            }
+          }
+        }
+        knownPresence = activeUsersById;
+        presenceList = [...activeUsersById.values()];
         renderPresence();
         renderNotesList();
       }, (err) => {
@@ -453,7 +501,6 @@ That's the full syntax guide. Try editing these examples, then make this note yo
           [`notebooks/${notebookToken}/notes/${note.id}`]: null,
           [`notebooks/${notebookToken}/noteContent/${note.id}`]: null
         });
-        showToast('Note deleted from this token room.');
       } catch (err) {
         deletedNoteIds.delete(note.id);
         console.error('Delete note error:', err);
