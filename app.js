@@ -30,7 +30,7 @@
     let notes = [];
     let activeNoteId = null;
     let presenceList = [];
-    let viewMode = 'edit'; // 'edit' | 'split' | 'preview'
+    let viewMode = 'preview'; // 'edit' | 'split' | 'preview'
     const deletedNoteIds = new Set();
     let isEditing = false;
     let editingTimeout = null;
@@ -554,6 +554,8 @@ That's the full syntax guide. Try editing these examples, then make this note yo
 
       activeNoteId = noteId;
       activeNoteIdForDoc = noteId;
+      noteEditor.value = '';
+      setViewMode('preview');
       noteEditor.disabled = true;
       activeNoteDoc = new Y.Doc();
       activeNoteText = activeNoteDoc.getText('content');
@@ -747,34 +749,38 @@ That's the full syntax guide. Try editing these examples, then make this note yo
     });
 
     // --- View Mode Switching ---
+    function setViewMode(mode) {
+      viewMode = mode;
+      modeBtns.forEach(b => {
+        if (b.dataset.mode === viewMode) {
+          b.classList.add('text-textMain', 'bg-surfaceHover');
+          b.classList.remove('text-textMuted');
+        } else {
+          b.classList.remove('text-textMain', 'bg-surfaceHover');
+          b.classList.add('text-textMuted');
+        }
+      });
+
+      if (viewMode === 'edit') {
+        editorPane.classList.remove('hidden');
+        splitDivider.classList.add('hidden');
+        previewPane.classList.add('hidden');
+      } else if (viewMode === 'split') {
+        editorPane.classList.remove('hidden');
+        splitDivider.classList.remove('hidden');
+        previewPane.classList.remove('hidden');
+        renderPreview();
+      } else if (viewMode === 'preview') {
+        editorPane.classList.add('hidden');
+        splitDivider.classList.add('hidden');
+        previewPane.classList.remove('hidden');
+        renderPreview();
+      }
+    }
+
     modeBtns.forEach((btn) => {
       btn.addEventListener('click', () => {
-        viewMode = btn.dataset.mode;
-        modeBtns.forEach(b => {
-          if (b.dataset.mode === viewMode) {
-            b.classList.add('text-textMain', 'bg-surfaceHover');
-            b.classList.remove('text-textMuted');
-          } else {
-            b.classList.remove('text-textMain', 'bg-surfaceHover');
-            b.classList.add('text-textMuted');
-          }
-        });
-
-        if (viewMode === 'edit') {
-          editorPane.classList.remove('hidden');
-          splitDivider.classList.add('hidden');
-          previewPane.classList.add('hidden');
-        } else if (viewMode === 'split') {
-          editorPane.classList.remove('hidden');
-          splitDivider.classList.remove('hidden');
-          previewPane.classList.remove('hidden');
-          renderPreview();
-        } else if (viewMode === 'preview') {
-          editorPane.classList.add('hidden');
-          splitDivider.classList.add('hidden');
-          previewPane.classList.remove('hidden');
-          renderPreview();
-        }
+        setViewMode(btn.dataset.mode);
       });
     });
 

@@ -146,9 +146,9 @@
 
           <!-- View Mode Toggle: Edit | Split | Preview -->
           <div class="flex items-center bg-surface border border-border rounded-lg p-0.5 text-xs font-mono">
-            <button data-mode="edit" class="mode-btn px-2.5 py-1 rounded-md transition-colors text-textMain bg-surfaceHover">Edit</button>
+            <button data-mode="edit" class="mode-btn px-2.5 py-1 rounded-md transition-colors text-textMuted hover:text-textMain">Edit</button>
             <button data-mode="split" class="mode-btn hidden sm:block px-2.5 py-1 rounded-md transition-colors text-textMuted hover:text-textMain">Split</button>
-            <button data-mode="preview" class="mode-btn px-2.5 py-1 rounded-md transition-colors text-textMuted hover:text-textMain">Preview</button>
+            <button data-mode="preview" class="mode-btn px-2.5 py-1 rounded-md transition-colors text-textMain bg-surfaceHover">Preview</button>
           </div>
         </div>
       </header>
@@ -169,7 +169,7 @@
       <!-- Editor & Preview Workspace -->
       <div id="workspace" class="flex-1 flex overflow-hidden">
         <!-- Raw Org-mode Textarea -->
-        <div id="editor-pane" class="flex-1 flex flex-col min-w-0 h-full">
+        <div id="editor-pane" class="hidden flex-1 flex flex-col min-w-0 h-full">
           <textarea
             id="note-editor"
             spellcheck="false"
@@ -181,7 +181,7 @@
         <div id="split-divider" class="hidden w-px bg-border shrink-0"></div>
 
         <!-- Live Org-mode Preview -->
-        <div id="preview-pane" class="hidden flex-1 overflow-y-auto p-4 sm:p-6 bg-bg/50">
+        <div id="preview-pane" class="flex-1 overflow-y-auto p-4 sm:p-6 bg-bg/50">
           <div id="org-preview-content" class="org-preview text-sm max-w-3xl"></div>
         </div>
       </div>
