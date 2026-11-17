@@ -830,6 +830,28 @@ That's the full syntax guide. Try editing these examples, then make this note yo
     });
 
     // --- Render Sidebar Notes ---
+    function formatRelativeTime(timestamp) {
+      if (!Number.isFinite(timestamp) || timestamp <= 0) return 'Modified time unknown';
+
+      const elapsedSeconds = Math.max(0, Math.floor((Date.now() - timestamp) / 1000));
+      if (elapsedSeconds < 60) return 'Modified just now';
+
+      const elapsedMinutes = Math.floor(elapsedSeconds / 60);
+      if (elapsedMinutes < 60) return `Modified ${elapsedMinutes}m ago`;
+
+      const elapsedHours = Math.floor(elapsedMinutes / 60);
+      if (elapsedHours < 24) return `Modified ${elapsedHours}h ago`;
+
+      const elapsedDays = Math.floor(elapsedHours / 24);
+      if (elapsedDays < 30) return `Modified ${elapsedDays}d ago`;
+
+      const elapsedMonths = Math.floor(elapsedDays / 30);
+      if (elapsedMonths < 12) return `Modified ${elapsedMonths}mo ago`;
+
+      const elapsedYears = Math.floor(elapsedMonths / 12);
+      return `Modified ${elapsedYears}y ago`;
+    }
+
     function renderNotesList() {
       notesListEl.innerHTML = '';
       notes.forEach((note) => {
@@ -848,10 +870,23 @@ That's the full syntax guide. Try editing these examples, then make this note yo
         }`;
         btn.onclick = () => selectNote(note.id);
 
-        const titleSpan = document.createElement('span');
-        titleSpan.className = 'truncate';
+        const textWrap = document.createElement('div');
+        textWrap.className = 'min-w-0 flex-1';
+
+        const titleSpan = document.createElement('div');
+        titleSpan.className = 'truncate leading-tight';
         titleSpan.textContent = note.title || 'Untitled Note';
-        btn.appendChild(titleSpan);
+        textWrap.appendChild(titleSpan);
+
+        const metadataSpan = document.createElement('div');
+        metadataSpan.className = 'mt-0.5 truncate text-[11px] leading-tight text-textMuted/75';
+        const modifier = typeof note.updatedBy === 'string' && note.updatedBy.trim()
+          ? ` by ${note.updatedBy.trim()}`
+          : '';
+        metadataSpan.textContent = `${formatRelativeTime(note.updatedAt)}${modifier}`;
+        metadataSpan.title = `${formatRelativeTime(note.updatedAt)}${modifier}`;
+        textWrap.appendChild(metadataSpan);
+        btn.appendChild(textWrap);
 
         if (viewers.length > 0) {
           const dotsWrap = document.createElement('div');
@@ -882,6 +917,8 @@ That's the full syntax guide. Try editing these examples, then make this note yo
         notesListEl.appendChild(row);
       });
     }
+
+    setInterval(renderNotesList, 60000);
 
     // --- Render Presence ---
     function renderPresence() {
