@@ -809,6 +809,7 @@ That's the full syntax guide. Try editing these examples, then make this note yo
         editorPane.classList.remove('hidden');
         splitDivider.classList.add('hidden');
         previewPane.classList.add('hidden');
+        renderEditorHighlight();
       } else if (viewMode === 'split') {
         editorPane.classList.remove('hidden');
         splitDivider.classList.remove('hidden');

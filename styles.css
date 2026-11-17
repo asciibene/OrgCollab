@@ -29,6 +29,7 @@
       inset: 0;
       overflow: hidden;
       pointer-events: none;
+      z-index: 0;
     }
     #editor-highlight pre,
     #note-editor {
@@ -54,11 +55,20 @@
       position: relative;
       z-index: 1;
       display: block;
+      margin: 0;
+      padding: 1rem;
+      border: 0;
+      background: transparent;
       color: transparent;
       -webkit-text-fill-color: transparent;
       caret-color: #e6edf3;
       white-space: pre-wrap;
       overflow-wrap: break-word;
+    }
+    @media (min-width: 640px) {
+      #note-editor {
+        padding: 1.5rem;
+      }
     }
     #note-editor::selection {
       background: rgba(88, 166, 255, 0.3);
