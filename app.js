@@ -75,6 +75,7 @@
 
     const noteTitleInput = document.getElementById('note-title-input');
     const noteEditor = document.getElementById('note-editor');
+    const editorHighlight = document.querySelector('#editor-highlight pre');
     const notePresenceEl = document.getElementById('note-presence');
     const mobileNotePresenceEl = document.getElementById('mobile-note-presence');
     const syncStatusEl = document.getElementById('sync-status');
@@ -267,6 +268,7 @@
       isEditing = false;
       noteTitleInput.value = '';
       noteEditor.value = '';
+      renderEditorHighlight();
       noteEditor.disabled = true;
       renderNotesList();
       renderPresence();
@@ -508,6 +510,7 @@ That's the full syntax guide. Try editing these examples, then make this note yo
         activeNoteDocObserver = null;
         noteTitleInput.value = '';
         noteEditor.value = '';
+        renderEditorHighlight();
         noteEditor.disabled = true;
         isEditing = false;
         updateWorkspaceVisibility();
@@ -555,6 +558,7 @@ That's the full syntax guide. Try editing these examples, then make this note yo
       activeNoteId = noteId;
       activeNoteIdForDoc = noteId;
       noteEditor.value = '';
+      renderEditorHighlight();
       setViewMode('preview');
       noteEditor.disabled = true;
       activeNoteDoc = new Y.Doc();
@@ -578,6 +582,7 @@ That's the full syntax guide. Try editing these examples, then make this note yo
             adjustPosition(selectionEnd)
           );
         }
+        renderEditorHighlight();
         renderPreview();
       });
       activeNoteDocObserver = (_updateBytes, origin) => {
@@ -743,10 +748,49 @@ That's the full syntax guide. Try editing these examples, then make this note yo
     noteTitleInput.addEventListener('input', scheduleSave);
     noteEditor.addEventListener('input', () => {
       scheduleSave();
+      renderEditorHighlight();
       if (viewMode === 'split' || viewMode === 'preview') {
         renderPreview();
       }
     });
+    noteEditor.addEventListener('scroll', () => {
+      editorHighlight.style.transform = `translate(${-noteEditor.scrollLeft}px, ${-noteEditor.scrollTop}px)`;
+    });
+
+    function highlightInlineOrg(text) {
+      const tokenPattern = /(\[\[[^\]\n]+\]\]|[=~][^=~\n]+[=~]|#[a-zA-Z0-9_-]+|\bTODO\b|\bDONE\b)/g;
+      let html = '';
+      let previousIndex = 0;
+      for (const match of text.matchAll(tokenPattern)) {
+        const token = match[0];
+        html += escapeHtml(text.slice(previousIndex, match.index));
+        let tokenClass = '';
+        if (token.startsWith('[[')) tokenClass = 'org-syntax-link';
+        else if (token.startsWith('=') || token.startsWith('~')) tokenClass = 'org-syntax-code';
+        else if (token.startsWith('#')) tokenClass = 'org-syntax-tag';
+        else tokenClass = token === 'TODO' ? 'org-syntax-todo' : 'org-syntax-done';
+        html += `<span class="${tokenClass}">${escapeHtml(token)}</span>`;
+        previousIndex = match.index + token.length;
+      }
+      return html + escapeHtml(text.slice(previousIndex));
+    }
+
+    function highlightOrgLine(line) {
+      const heading = line.match(/^(\*{1,3})(\s+)(.*)$/);
+      if (heading) {
+        return `<span class="org-syntax-heading">${escapeHtml(heading[1])}</span>${escapeHtml(heading[2])}${highlightInlineOrg(heading[3])}`;
+      }
+      const bullet = line.match(/^(\s*)([-+])(\s+)(.*)$/);
+      if (bullet) {
+        return `${escapeHtml(bullet[1])}<span class="org-syntax-bullet">${escapeHtml(bullet[2])}</span>${escapeHtml(bullet[3])}${highlightInlineOrg(bullet[4])}`;
+      }
+      return highlightInlineOrg(line);
+    }
+
+    function renderEditorHighlight() {
+      editorHighlight.innerHTML = noteEditor.value.split('\n').map(highlightOrgLine).join('\n') + '\n';
+      editorHighlight.style.transform = `translate(${-noteEditor.scrollLeft}px, ${-noteEditor.scrollTop}px)`;
+    }
 
     // --- View Mode Switching ---
     function setViewMode(mode) {
@@ -960,6 +1004,7 @@ That's the full syntax guide. Try editing these examples, then make this note yo
           const linesArr = noteEditor.value.split('\n');
           linesArr[lineIdx] = linesArr[lineIdx].replace(currentStatus, nextStatus);
           noteEditor.value = linesArr.join('\n');
+          renderEditorHighlight();
           renderPreview();
           scheduleSave();
         });

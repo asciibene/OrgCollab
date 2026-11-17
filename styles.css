@@ -23,12 +23,72 @@
     ::-webkit-scrollbar-thumb:hover {
       background: #3b434f;
     }
-    /* Org-mode editor textarea */
+    /* Org-mode editor highlighting layer and textarea */
+    #editor-highlight {
+      position: absolute;
+      inset: 0;
+      overflow: hidden;
+      pointer-events: none;
+    }
+    #editor-highlight pre,
     #note-editor {
       font-family: 'JetBrains Mono', monospace;
       line-height: 1.65;
       tab-size: 2;
       resize: none;
+    }
+    #editor-highlight pre {
+      margin: 0;
+      padding: 1rem;
+      font-size: 0.875rem;
+      color: #e6edf3;
+      white-space: pre-wrap;
+      overflow-wrap: break-word;
+    }
+    @media (min-width: 640px) {
+      #editor-highlight pre {
+        padding: 1.5rem;
+      }
+    }
+    #note-editor {
+      position: relative;
+      z-index: 1;
+      display: block;
+      color: transparent;
+      -webkit-text-fill-color: transparent;
+      caret-color: #e6edf3;
+      white-space: pre-wrap;
+      overflow-wrap: break-word;
+    }
+    #note-editor::selection {
+      background: rgba(88, 166, 255, 0.3);
+    }
+    .org-syntax-heading {
+      color: #79c0ff;
+      font-weight: 600;
+    }
+    .org-syntax-bullet {
+      color: #8b949e;
+      font-weight: 600;
+    }
+    .org-syntax-todo {
+      color: #f85149;
+      font-weight: 600;
+    }
+    .org-syntax-done {
+      color: #3fb950;
+      font-weight: 600;
+    }
+    .org-syntax-code {
+      color: #a5d6ff;
+    }
+    .org-syntax-tag {
+      color: #d2a8ff;
+    }
+    .org-syntax-link {
+      color: #58a6ff;
+      text-decoration: underline;
+      text-decoration-style: dotted;
     }
     #note-editor:focus {
       outline: none;

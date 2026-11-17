@@ -168,13 +168,16 @@
 
       <!-- Editor & Preview Workspace -->
       <div id="workspace" class="flex-1 flex overflow-hidden">
-        <!-- Raw Org-mode Textarea -->
+        <!-- Org-mode editor -->
         <div id="editor-pane" class="hidden flex-1 flex flex-col min-w-0 h-full">
-          <textarea
-            id="note-editor"
-            spellcheck="false"
-            class="flex-1 w-full h-full bg-bg text-textMain p-4 sm:p-6 text-sm focus:outline-none overflow-y-auto"
-          ></textarea>
+          <div class="flex-1 relative min-h-0">
+            <div id="editor-highlight" aria-hidden="true"><pre></pre></div>
+            <textarea
+              id="note-editor"
+              spellcheck="false"
+              class="w-full h-full bg-transparent p-4 sm:p-6 text-sm focus:outline-none overflow-auto"
+            ></textarea>
+          </div>
         </div>
 
         <!-- Divider (for Split mode) -->
