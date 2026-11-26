@@ -57,6 +57,8 @@
     const tokenForm = document.getElementById('token-form');
     const tokenInput = document.getElementById('token-input');
     const nicknameInput = document.getElementById('nickname-input');
+    const NICKNAME_COOKIE = 'orgcollab-nickname';
+    nicknameInput.value = readCookie(NICKNAME_COOKIE);
     const joinBtn = document.getElementById('join-btn');
     const gateError = document.getElementById('gate-error');
     const appShell = document.getElementById('app-shell');
@@ -117,6 +119,29 @@
       return `anon-${num}`;
     }
 
+    function readCookie(name) {
+      const prefix = `${encodeURIComponent(name)}=`;
+      const cookie = document.cookie.split(';')
+        .map((part) => part.trim())
+        .find((part) => part.startsWith(prefix));
+      if (!cookie) return '';
+
+      try {
+        return decodeURIComponent(cookie.slice(prefix.length));
+      } catch (err) {
+        if (err instanceof URIError) {
+          console.warn('Could not decode saved display name cookie:', err);
+          return '';
+        }
+        throw err;
+      }
+    }
+
+    function saveNicknameCookie(value) {
+      const secureAttribute = window.location.protocol === 'https:' ? '; Secure' : '';
+      document.cookie = `${NICKNAME_COOKIE}=${encodeURIComponent(value)}; Max-Age=31536000; Path=/; SameSite=Lax${secureAttribute}`;
+    }
+
     function sanitizeToken(raw) {
       return raw.trim().toLowerCase().replace(/[^a-z0-9_-]/g, '-').slice(0, 80);
     }
@@ -174,6 +199,7 @@
         return;
       }
 
+      saveNicknameCookie(nickname);
       gateError.classList.add('hidden');
       tokenGate.classList.add('hidden');
       appShell.classList.remove('hidden');
@@ -540,8 +566,9 @@ That's the full syntax guide. Try editing these examples, then make this note yo
     }
 
     function selectNote(noteId) {
-      if (activeNoteIdForDoc && activeNoteDoc) {
+      if (activeNoteIdForDoc && activeNoteDoc && saveTimeout !== null) {
         clearTimeout(saveTimeout);
+        saveTimeout = null;
         void persistSharedState(activeNoteIdForDoc, activeNoteDoc);
       }
       if (titleSaveTimeout && activeNoteId) {
