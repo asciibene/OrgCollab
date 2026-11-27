@@ -469,10 +469,15 @@ Start a line with a hyphen or plus sign followed by a space. Leading spaces are 
 Surround text with equals signs or tildes to show inline code: =const answer = 42= or ~print("hello")~.
 Write a tag with # followed by letters, numbers, underscores, or hyphens, like #example or #quick_note.
 
-** 5. Links to other notes
+** 5. Priorities
+Add #A for high priority, #B for medium priority, or #C for low priority as the very last text on a line.
+*** Review the proposal #A
+- Update the notes #C
+
+** 6. Links to other notes
 Put a note title inside double square brackets, like [[Another Note]]. In Preview, click the link to open that note or create it.
 
-** 6. Paragraphs
+** 7. Paragraphs
 Ordinary lines become paragraphs. Put a blank line between paragraphs to add space.
 This is one paragraph.
 
@@ -784,13 +789,30 @@ That's the full syntax guide. Try editing these examples, then make this note yo
       editorHighlight.style.transform = `translate(${-noteEditor.scrollLeft}px, ${-noteEditor.scrollTop}px)`;
     });
 
+    function splitPriority(text) {
+      const match = text.match(/(?:^|\s)#([ABC])$/);
+      if (!match) return { text, priority: null };
+      return {
+        text: text.slice(0, match.index).trimEnd(),
+        priority: match[1]
+      };
+    }
+
+    function renderPriority(priority, syntax = false) {
+      const className = syntax
+        ? `org-syntax-priority-${priority.toLowerCase()}`
+        : `org-priority org-priority-${priority.toLowerCase()}`;
+      return `<span class="${className}" title="Priority ${priority}">#${priority}</span>`;
+    }
+
     function highlightInlineOrg(text) {
+      const { text: content, priority } = splitPriority(text);
       const tokenPattern = /(\[\[[^\]\n]+\]\]|[=~][^=~\n]+[=~]|#[a-zA-Z0-9_-]+|\bTODO\b|\bDONE\b)/g;
       let html = '';
       let previousIndex = 0;
-      for (const match of text.matchAll(tokenPattern)) {
+      for (const match of content.matchAll(tokenPattern)) {
         const token = match[0];
-        html += escapeHtml(text.slice(previousIndex, match.index));
+        html += escapeHtml(content.slice(previousIndex, match.index));
         let tokenClass = '';
         if (token.startsWith('[[')) tokenClass = 'org-syntax-link';
         else if (token.startsWith('=') || token.startsWith('~')) tokenClass = 'org-syntax-code';
@@ -799,7 +821,8 @@ That's the full syntax guide. Try editing these examples, then make this note yo
         html += `<span class="${tokenClass}">${escapeHtml(token)}</span>`;
         previousIndex = match.index + token.length;
       }
-      return html + escapeHtml(text.slice(previousIndex));
+      html += escapeHtml(content.slice(previousIndex));
+      return priority ? html + renderPriority(priority, true) : html;
     }
 
     function highlightOrgLine(line) {
@@ -987,14 +1010,15 @@ That's the full syntax guide. Try editing these examples, then make this note yo
 
     // --- Org-Mode Parser & Interactive Preview ---
     function formatInlineOrg(text) {
-      let html = escapeHtml(text);
+      const { text: content, priority } = splitPriority(text);
+      let html = escapeHtml(content);
       // Inline code =code= or ~code~
       html = html.replace(/([=~])([^=~]+)\1/g, '<code class="org-code">$2</code>');
       // Tags #tag
       html = html.replace(/(^|\s)(#[a-zA-Z0-9_-]+)/g, '$1<span class="org-tag">$2</span>');
       // Wiki links [[note-title]]
       html = html.replace(/\[\[([^\]]+)\]\]/g, '<span class="org-link" data-link="$1">[[$1]]</span>');
-      return html;
+      return priority ? `${html}${renderPriority(priority)}` : html;
     }
 
     function renderPreview() {
